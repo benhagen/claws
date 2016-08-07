@@ -1,16 +1,9 @@
 
-#import netaddr
 from netaddr import IPNetwork
 from pygments import highlight, lexers, formatters
 import colorama
 from datetime import datetime
 import json
-
-try:
-	import geoip2.database
-	GEOIP_READER = geoip2.database.Reader("./GeoLite2-City.mmdb")
-except:
-	GEOIP_READER = None
 
 
 def cidr_is_within(cidr, cidr_ranges):
@@ -65,16 +58,23 @@ class SecurityGroupRule():
 			self.to_port = int(self.to_port)
 		return output
 
+	def to_ip_permission(self):
+		ip_permission = {
+			"IpProtocol": self.ip_protocol,
+			"FromPort": self.from_port,
+			"ToPort": self.to_port
+		}
+		if self.cidr_ip:
+			ip_permission['IpRanges'] = [{"CidrIp": self.cidr_ip}]
+		if self.group_id:
+			ip_permission['UserIdGroupPairs'] = [{
+				"GroupId": self.group_id,
+				"GroupOwnerId": self.group_owner
+			}]
+		return ip_permission
+
 	def summarize(self, colorize=True):
-		location = "Unknown Location"
-		if GEOIP_READER:
-			try:
-				response = GEOIP_READER.city(self.cidr_ip.split("/")[0])
-			except:
-				pass
-			else:
-				location = "{}, {}, {}".format(response.city.name, response.subdivisions.most_specific.name, response.country.iso_code)
-		output = "{: <24} ({}): {: <4} {: >5}-{: <5} {: <18} ({})".format(self.__securitygroup__.group_name, self.__securitygroup__.group_id, self.ip_protocol, self.from_port, self.to_port, self.cidr_ip, location)
+		output = "{: <24} ({}): {: <4} {: >5}-{: <5} {: <18}".format(self.__securitygroup__.group_name, self.__securitygroup__.group_id, self.ip_protocol, self.from_port, self.to_port, self.cidr_ip)
 		if colorize:
 			if self.cidr_ip == "0.0.0.0/0":
 				output = "{}{}{}".format(colorama.Fore.RED, output, colorama.Fore.WHITE)
@@ -148,7 +148,6 @@ class Ec2ResourceClass(object):
 		output = {}
 		for vpc in self.vpcs.all():
 			name = None
-			print dir(vpc)
 			for tag in vpc.tags:
 				if tag['Key'] == "Name":
 					name = tag['Value']
@@ -160,7 +159,7 @@ class Ec2ResourceClass(object):
 	def claws_describe_security_group(self, group_id=None, group_name=None, vpc_id=None, vpc_name=None):
 		filters = []
 		if vpc_name:
-			vpc_id = self.vpc_lookup[vpc_name]
+			vpc_id = self.vpc_lookup[vpc_name].id
 		if group_id:
 			filters.append({"Name": "group-id", "Values": [group_id]})
 		if group_name:
